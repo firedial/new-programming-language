@@ -18,16 +18,13 @@ fn parse<'a>(line: &'a str) -> Vec<Value> {
             let value;
             (value, rest) = parse_block(rest);
             stack.push(value);
-        } else if let Ok(parsed) = word.parse::<i32>() {
-            stack.push(Value::Num(parsed));
         } else {
-            match word {
-                "+" => add(&mut stack),
-                "-" => sub(&mut stack),
-                "*" => mul(&mut stack),
-                "/" => div(&mut stack),
-                _ => panic!("{word:?} could not be parsed"),
-            }
+            let code = if let Ok(num) = word.parse::<i32>() {
+                Value::Num(num)
+            } else {
+                Value::Op(word)
+            };
+            eval(code, &mut stack)
         }
         words = rest;
     }
@@ -59,6 +56,28 @@ fn div(stack: &mut Vec<Value>) {
     stack.push(Value::Num(lhs / rhs));
 }
 
+fn op_if(stack: &mut Vec<Value>) {
+    let false_branch = stack.pop().unwrap().to_block();
+    let true_branch = stack.pop().unwrap().to_block();
+    let cond = stack.pop().unwrap().to_block();
+
+    for code in cond {
+        eval(code, stack)
+    }
+
+    let cond_result = stack.pop().unwrap().as_num();
+
+    if cond_result != 0 {
+        for code in true_branch {
+            eval(code, stack);
+        }
+    } else {
+        for code in false_branch {
+            eval(code, stack);
+        }
+    }
+}
+
 fn parse_block<'src, 'a>(
     input: &'a [&'src str],
 ) -> (Value<'src>, &'a [&'src str]) {
@@ -87,7 +106,7 @@ fn parse_block<'src, 'a>(
     (Value::Block(tokens), words)
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Value<'src> {
     Num(i32),
     Op(&'src str),
@@ -103,6 +122,29 @@ impl<'src> Value<'src> {
     }
 }
 
+impl<'src> Value<'src> {
+    fn to_block(self) -> Vec<Value<'src>> {
+        match self {
+            Self::Block(val) => val,
+            _ => panic!("Value is not a block"),
+        }
+    }
+}
+
+fn eval<'src>(code: Value<'src>, stack: &mut Vec<Value<'src>>) {
+    match code {
+        Value::Op(op) => match op {
+            "+" => add(stack),
+            "-" => sub(stack),
+            "*" => mul(stack),
+            "/" => div(stack),
+            "if" => op_if(stack),
+            _ => panic!("{op:?} could not be parsed"),
+        },
+        _ => stack.push(code.clone()),
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::{parse, Value::*};
@@ -111,6 +153,22 @@ mod test {
         assert_eq!(
             parse(r"1 2 + { 3 4 }"),
             vec![Num(3), Block(vec![Num(3), Num(4)])]
+        );
+    }
+
+    #[test]
+    fn tset_if_false() {
+        assert_eq!(
+            parse("{ 1 -1 + } { 100 } { -100 } if"),
+            vec![Num(-100)]
+        );
+    }
+
+    #[test]
+    fn tset_if_true() {
+        assert_eq!(
+            parse("{ 1 1 + } { 100 } { -100 } if"),
+            vec![Num(100)]
         );
     }
 }
